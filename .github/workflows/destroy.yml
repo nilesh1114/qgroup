@@ -1,0 +1,64 @@
+name: Terraform Destroy EC2 with Workspaces
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Select the environment to destroy resources from'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: "1.4.0"
+
+      - name: Set AWS region
+        id: set-region
+        run: |
+          if [ "${{ github.event.inputs.environment }}" == "production" ]; then
+            echo "AWS_REGION=${{ secrets.AWS_REGION_PRODUCTION }}" >> $GITHUB_ENV
+          else
+            echo "AWS_REGION=${{ secrets.AWS_REGION_STAGING }}" >> $GITHUB_ENV
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+          audience: ${{ secrets.AWS_AUDIENCE }}
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Set Terraform Workspace
+        run: |
+          if [ "${{ github.event.inputs.environment }}" == "production" ]; then
+            terraform workspace select production || terraform workspace new production
+          else
+            terraform workspace select staging || terraform workspace new staging
+          fi
+
+      - name: Terraform Destroy
+        run: terraform destroy -var-file="${{ github.event.inputs.environment }}.tfvars" -auto-approve
+
+      - name: Output Destroy Status
+        run: |
+          echo "Terraform destroy process completed for ${GITHUB_EVENT_INPUTS_ENVIRONMENT}."
